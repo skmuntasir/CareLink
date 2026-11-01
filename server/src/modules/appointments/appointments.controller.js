@@ -1,0 +1,376 @@
+const Appointment = require('../../models/Appointment');
+const AvailabilitySlot = require('../../models/AvailabilitySlot');
+const DoctorProfile = require('../../models/DoctorProfile');
+const Payment = require('../../models/Payment');
+const { sendEmail } = require('../../config/email');
+const { createAppointmentNotification } = require('../../utils/notify');
+const User = require('../../models/User');
+
+// Patient books an appointment
+const bookAppointment = async (req, res) => {
+  try {
+    const patientId = req.user._id;
+    const { doctorId, slotId } = req.body;
+
+    // Check if slot is available
+    const slot = await AvailabilitySlot.findById(slotId);
+
+    if (!slot) {
+      return res.status(404).json({
+        success: false,
+        message: 'Slot not found',
+      });
+    }
+
+    if (slot.isBooked) {
+      return res.status(400).json({
+        success: false,
+        message: 'Slot is already booked',
+      });
+    }
+
+    if (slot.doctorId.toString() !== doctorId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Slot does not belong to this doctor',
+      });
+    }
+
+    // Demo sandbox: demo patients can only book demo doctors (and real patients never can)
+    const doctorUser = await User.findById(doctorId).select('isDemo');
+    if (!doctorUser || !!doctorUser.isDemo !== !!req.user.isDemo) {
+      return res.status(403).json({
+        success: false,
+        message: req.user.isDemo
+          ? 'Demo patients can only book the demo doctor.'
+          : 'Doctor not found',
+      });
+    }
+
+    // Create appointment
+    const appointment = await Appointment.create({
+      patientId,
+      doctorId,
+      slotId,
+    });
+
+    // Mark slot as booked
+    slot.isBooked = true;
+    await slot.save();
+
+    // Create notification for doctor
+    await createAppointmentNotification(appointment, 'BOOKED');
+
+    // Populate details
+    await appointment.populate([
+      { path: 'patientId', select: 'name email' },
+      { path: 'doctorId', select: 'name email' },
+      { path: 'slotId' },
+    ]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Appointment booked successfully. Please proceed to payment.',
+      data: { appointment },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Get user appointments (patient or doctor)
+const getMyAppointments = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const role = req.user.role;
+
+    let query = {};
+    if (role === 'PATIENT') {
+      query.patientId = userId;
+    } else if (role === 'DOCTOR') {
+      query.doctorId = userId;
+    }
+
+    const appointments = await Appointment.find(query)
+      .populate('patientId', 'name email')
+      .populate('doctorId', 'name email')
+      .populate('slotId')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: { appointments },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Cancel appointment
+const cancelAppointment = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id } = req.params;
+    const { cancelReason } = req.body;
+
+    const appointment = await Appointment.findById(id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found',
+      });
+    }
+
+    // Check ownership
+    if (appointment.patientId.toString() !== userId.toString() && 
+        appointment.doctorId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to cancel this appointment',
+      });
+    }
+
+    if (appointment.status === 'CANCELLED' || appointment.status === 'COMPLETED') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot cancel ${appointment.status.toLowerCase()} appointment`,
+      });
+    }
+
+    // Handle refund if appointment is CONFIRMED and has payment
+    let refundAmount = 0;
+    let refundMessage = '';
+    
+    if (appointment.status === 'CONFIRMED') {
+      // Find payment for this appointment
+      const payment = await Payment.findOne({ appointmentId: id });
+      
+      if (payment && payment.status === 'SUCCESS') {
+        // Calculate refund based on time policy
+        const appointmentDate = new Date(appointment.slotId.date);
+        const currentTime = new Date();
+        const timeDiffHours = Math.abs(appointmentDate - currentTime) / (1000 * 60 * 60);
+        
+        // Refund policy:
+        // - Full refund if > 48 hours before appointment
+        // - 50% refund if 24-48 hours before appointment
+        // - No refund if < 24 hours before appointment
+        
+        if (timeDiffHours > 48) {
+          // Full refund
+          refundAmount = payment.amount;
+          payment.status = 'REFUNDED';
+          await payment.save();
+          refundMessage = `Full refund of ${refundAmount} BDT will be processed.`;
+        } else if (timeDiffHours > 24) {
+          // 50% refund
+          refundAmount = payment.amount * 0.5;
+          payment.status = 'REFUNDED';
+          await payment.save();
+          refundMessage = `50% refund of ${refundAmount} BDT will be processed.`;
+        } else {
+          // No refund
+          refundMessage = 'No refund (within 24h policy).';
+        }
+        
+        // Send refund email notification
+        if (refundAmount > 0) {
+          await sendEmail({
+            to: appointment.patientId.email,
+            subject: 'Appointment Cancellation & Refund - CareLink',
+            html: `
+              <h2>Appointment Cancelled</h2>
+              <p>Hi ${appointment.patientId.name},</p>
+              <p>Your appointment has been cancelled.</p>
+              <p><strong>Refund Amount:</strong> ${refundAmount} ${payment.currency}</p>
+              <p>${refundMessage}</p>
+              <p>The refund will reflect in your account within 5-7 business days.</p>
+            `,
+          });
+        } else {
+          await sendEmail({
+            to: appointment.patientId.email,
+            subject: 'Appointment Cancellation - CareLink',
+            html: `
+              <h2>Appointment Cancelled</h2>
+              <p>Hi ${appointment.patientId.name},</p>
+              <p>Your appointment has been cancelled.</p>
+              <p>${refundMessage}</p>
+            `,
+          });
+        }
+      }
+    }
+
+    appointment.status = 'CANCELLED';
+    appointment.cancelReason = cancelReason || '';
+    await appointment.save();
+
+    // Free up the slot
+    const slot = await AvailabilitySlot.findById(appointment.slotId);
+    if (slot) {
+      slot.isBooked = false;
+      await slot.save();
+    }
+
+    // Create notification for cancellation
+    await createAppointmentNotification(appointment, 'CANCELLED');
+
+    res.json({
+      success: true,
+      message: `Appointment cancelled successfully. ${refundMessage}`,
+      data: { appointment, refundAmount },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Reschedule appointment
+const rescheduleAppointment = async (req, res) => {
+  try {
+    const patientId = req.user._id;
+    const { id } = req.params;
+    const { newSlotId } = req.body;
+
+    const appointment = await Appointment.findById(id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found',
+      });
+    }
+
+    if (appointment.patientId.toString() !== patientId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized',
+      });
+    }
+
+    // Check new slot
+    const newSlot = await AvailabilitySlot.findById(newSlotId);
+
+    if (!newSlot || newSlot.isBooked) {
+      return res.status(400).json({
+        success: false,
+        message: 'New slot is not available',
+      });
+    }
+
+    if (newSlot.doctorId.toString() !== appointment.doctorId.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'New slot must be with the same doctor',
+      });
+    }
+
+    // Free old slot
+    const oldSlot = await AvailabilitySlot.findById(appointment.slotId);
+    if (oldSlot) {
+      oldSlot.isBooked = false;
+      await oldSlot.save();
+    }
+
+    // Book new slot
+    newSlot.isBooked = true;
+    await newSlot.save();
+
+    // Update appointment
+    appointment.slotId = newSlotId;
+    appointment.status = 'RESCHEDULED';
+    await appointment.save();
+
+    res.json({
+      success: true,
+      message: 'Appointment rescheduled successfully',
+      data: { appointment },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Get doctor's appointments
+const getDoctorAppointments = async (req, res) => {
+  try {
+    const doctorId = req.user._id;
+
+    const appointments = await Appointment.find({ doctorId })
+      .populate('patientId', 'name email')
+      .populate('slotId')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: { appointments },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Get single appointment
+const getAppointmentById = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id } = req.params;
+
+    const appointment = await Appointment.findById(id)
+      .populate('patientId', 'name email')
+      .populate('doctorId', 'name email')
+      .populate('slotId');
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found',
+      });
+    }
+
+    // Check access
+    if (appointment.patientId._id.toString() !== userId.toString() &&
+        appointment.doctorId._id.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to view this appointment',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { appointment },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+module.exports = {
+  bookAppointment,
+  getMyAppointments,
+  cancelAppointment,
+  rescheduleAppointment,
+  getDoctorAppointments,
+  getAppointmentById,
+};

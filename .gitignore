@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+yarn.lock
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Uploads
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Testing
+coverage/
+.nyc_output/
+CSE470_Group_Assignment1.docx
+
+# Qoder artifacts (keep repo clean)
+__qoder__/
+*_SUMMARY*.md
+*_FIX_SUMMARY*.md
+*_UPDATE_SUMMARY*.md
+NOTIFICATION_*_SUMMARY*.md
+STALE_NOTIFICATIONS_*_SUMMARY*.md
+PROFESSIONAL_README.md
+README_UPDATE_SUMMARY.md
