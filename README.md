@@ -19,7 +19,7 @@
 
 The system enforces **strict Role-Based Access Control (RBAC)** to ensure medical data privacy and security across three distinct user roles: **Patient**, **Doctor**, and **Administrator**. Each role is provided with clearly defined capabilities, ensuring proper data isolation and compliance with healthcare privacy principles.
 
-Developed as part of the **CSE470: Software Engineering** course at **BRAC University**, this project emphasizes system correctness, security, scalability, and professional user experience.
+This project emphasizes system correctness, security, scalability, and professional user experience.
 
 ---
 
@@ -331,14 +331,6 @@ The notification system implements robust security measures:
 - Integration with third-party payment processors
 - Video consultation capabilities
 - Machine learning-based health trend prediction
-
-## Authors
-
-This project was developed as part of the CSE470: Software Engineering course at BRAC University.
-
-**Course**: CSE470 - Software Engineering  
-**University**: BRAC University  
-**Academic Year**: 2025
 
 ## License
 

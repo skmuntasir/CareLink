@@ -43,7 +43,6 @@ server/uploads/*
 # Testing
 coverage/
 .nyc_output/
-CSE470_Group_Assignment1.docx
 
 # Qoder artifacts (keep repo clean)
 __qoder__/

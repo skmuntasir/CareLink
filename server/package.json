@@ -9,7 +9,7 @@
     "seed": "node src/utils/seed.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "Sk Tasrian Muntasir",
   "license": "ISC",
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -10,7 +10,7 @@
     "install-all": "npm install && cd server && npm install && cd ../client && npm install"
   },
   "keywords": ["mern", "doctor", "patient", "consultation", "telemedicine"],
-  "author": "CSE470 Project Team",
+  "author": "Sk Tasrian Muntasir",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2"

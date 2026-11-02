@@ -47,7 +47,7 @@ export default function AuthLayout({ children }) {
           </ul>
         </div>
 
-        <p className="relative text-xs text-ink-500">© {new Date().getFullYear()} CareLink · CSE470 Project</p>
+        <p className="relative text-xs text-ink-500">© {new Date().getFullYear()} CareLink</p>
       </aside>
 
       {/* Form side */}
